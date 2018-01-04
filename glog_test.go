@@ -71,12 +71,12 @@ func (l *LoggingT) newBuffers() [numSeverity]flushSyncWriter {
 }
 
 // contents returns the specified log value as a string.
-func contents(s severity) string {
+func contents(s Severity) string {
 	return logging.file[s].(*flushBuffer).String()
 }
 
 // contains reports whether the string is contained in the log.
-func contains(s severity, str string, t *testing.T) bool {
+func contains(s Severity, str string, t *testing.T) bool {
 	return strings.Contains(contents(s), str)
 }
 

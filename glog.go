@@ -87,21 +87,29 @@ import (
 	"time"
 )
 
-// severity identifies the sort of log: info, warning etc. It also implements
-// the flag.Value interface. The -stderrthreshold flag is of type severity and
+// Severity identifies the sort of log: info, warning etc. It also implements
+// the flag.Value interface. The -stderrthreshold flag is of type Severity and
 // should be modified only through the flag.Value interface. The values match
 // the corresponding constants in C++.
-type severity int32 // sync/atomic int32
+type Severity int32 // sync/atomic int32
 
 // These constants identify the log levels in order of increasing severity.
 // A message written to a high-severity log file is also written to each
 // lower-severity log file.
 const (
-	infoLog severity = iota
+	infoLog Severity = iota
 	warningLog
 	errorLog
 	fatalLog
 	numSeverity = 4
+)
+
+// These constants identify the log levels in order of increasing severity.
+const (
+	InfoLog  = infoLog
+	WarnLog  = warningLog
+	ErrorLog = errorLog
+	FatalLog = fatalLog
 )
 
 const severityChar = "IWEF"
@@ -114,28 +122,28 @@ var severityName = []string{
 }
 
 // get returns the value of the severity.
-func (s *severity) get() severity {
-	return severity(atomic.LoadInt32((*int32)(s)))
+func (s *Severity) get() Severity {
+	return Severity(atomic.LoadInt32((*int32)(s)))
 }
 
 // set sets the value of the severity.
-func (s *severity) set(val severity) {
+func (s *Severity) set(val Severity) {
 	atomic.StoreInt32((*int32)(s), int32(val))
 }
 
 // String is part of the flag.Value interface.
-func (s *severity) String() string {
+func (s *Severity) String() string {
 	return strconv.FormatInt(int64(*s), 10)
 }
 
 // Get is part of the flag.Value interface.
-func (s *severity) Get() interface{} {
+func (s *Severity) Get() interface{} {
 	return *s
 }
 
 // Set is part of the flag.Value interface.
-func (s *severity) Set(value string) error {
-	var threshold severity
+func (s *Severity) Set(value string) error {
+	var threshold Severity
 	// Is it a known name?
 	if v, ok := severityByName(value); ok {
 		threshold = v
@@ -144,17 +152,17 @@ func (s *severity) Set(value string) error {
 		if err != nil {
 			return err
 		}
-		threshold = severity(v)
+		threshold = Severity(v)
 	}
 	logging.stderrThreshold.set(threshold)
 	return nil
 }
 
-func severityByName(s string) (severity, bool) {
+func severityByName(s string) (Severity, bool) {
 	s = strings.ToUpper(s)
 	for i, name := range severityName {
 		if name == s {
-			return severity(i), true
+			return Severity(i), true
 		}
 	}
 	return 0, false
@@ -504,7 +512,7 @@ type LoggingT struct {
 	alsoToStderr bool // The -alsologtostderr flag.
 
 	// Level flag. Handled atomically.
-	stderrThreshold severity // The -stderrthreshold flag.
+	stderrThreshold Severity // The -stderrthreshold flag.
 
 	// freeList is a list of byte buffers, maintained under freeListMu.
 	freeList *buffer
@@ -617,7 +625,7 @@ where the fields are defined as follows:
 	line             The line number
 	msg              The user-supplied message
 */
-func (l *LoggingT) header(s severity, depth int) (*buffer, string, int) {
+func (l *LoggingT) header(s Severity, depth int) (*buffer, string, int) {
 	_, file, line, ok := runtime.Caller(3 + depth)
 	if !ok {
 		file = "???"
@@ -632,10 +640,10 @@ func (l *LoggingT) header(s severity, depth int) (*buffer, string, int) {
 }
 
 // HeaderFormatFunc define the callback to made up custom header
-type HeaderFormatFunc func(l Level, ts time.Time, pid int, file string, line int) string
+type HeaderFormatFunc func(buf *bytes.Buffer, l Severity, ts time.Time, pid int, file string, line int)
 
 // formatHeader formats a log header using the provided file name and line number.
-func (l *LoggingT) formatHeader(s severity, file string, line int) *buffer {
+func (l *LoggingT) formatHeader(s Severity, file string, line int) *buffer {
 	now := timeNow()
 	if line < 0 {
 		line = 0 // not a real line number, but acceptable to someDigits
@@ -647,7 +655,7 @@ func (l *LoggingT) formatHeader(s severity, file string, line int) *buffer {
 
 	// use custom header
 	if l.headerFormater != nil {
-		buf.WriteString(l.headerFormater(Level(s), now, pid, file, line))
+		l.headerFormater(&buf.Buffer, s, now, pid, file, line)
 		return buf
 	}
 
@@ -721,17 +729,17 @@ func (buf *buffer) someDigits(i, d int) int {
 	return copy(buf.tmp[i:], buf.tmp[j:])
 }
 
-func (l *LoggingT) println(s severity, args ...interface{}) {
+func (l *LoggingT) println(s Severity, args ...interface{}) {
 	buf, file, line := l.header(s, 0)
 	fmt.Fprintln(buf, args...)
 	l.output(s, buf, file, line, false)
 }
 
-func (l *LoggingT) print(s severity, args ...interface{}) {
+func (l *LoggingT) print(s Severity, args ...interface{}) {
 	l.printDepth(s, 1, args...)
 }
 
-func (l *LoggingT) printDepth(s severity, depth int, args ...interface{}) {
+func (l *LoggingT) printDepth(s Severity, depth int, args ...interface{}) {
 	buf, file, line := l.header(s, depth)
 	fmt.Fprint(buf, args...)
 	if buf.Bytes()[buf.Len()-1] != '\n' {
@@ -740,7 +748,7 @@ func (l *LoggingT) printDepth(s severity, depth int, args ...interface{}) {
 	l.output(s, buf, file, line, false)
 }
 
-func (l *LoggingT) printf(s severity, format string, args ...interface{}) {
+func (l *LoggingT) printf(s Severity, format string, args ...interface{}) {
 	buf, file, line := l.header(s, 0)
 	fmt.Fprintf(buf, format, args...)
 	if buf.Bytes()[buf.Len()-1] != '\n' {
@@ -752,7 +760,7 @@ func (l *LoggingT) printf(s severity, format string, args ...interface{}) {
 // printWithFileLine behaves like print but uses the provided file and line number.  If
 // alsoLogToStderr is true, the log message always appears on standard error; it
 // will also appear in the log file unless --logtostderr is set.
-func (l *LoggingT) printWithFileLine(s severity, file string, line int, alsoToStderr bool, args ...interface{}) {
+func (l *LoggingT) printWithFileLine(s Severity, file string, line int, alsoToStderr bool, args ...interface{}) {
 	buf := l.formatHeader(s, file, line)
 	fmt.Fprint(buf, args...)
 	if buf.Bytes()[buf.Len()-1] != '\n' {
@@ -762,7 +770,7 @@ func (l *LoggingT) printWithFileLine(s severity, file string, line int, alsoToSt
 }
 
 // output writes the data to the log files and releases the buffer.
-func (l *LoggingT) output(s severity, buf *buffer, file string, line int, alsoToStderr bool) {
+func (l *LoggingT) output(s Severity, buf *buffer, file string, line int, alsoToStderr bool) {
 	l.mu.Lock()
 	if l.traceLocation.isSet() {
 		if l.traceLocation.match(file, line) {
@@ -894,7 +902,7 @@ type syncBuffer struct {
 	logger *LoggingT
 	*bufio.Writer
 	file   *os.File
-	sev    severity
+	sev    Severity
 	nbytes uint64 // The number of bytes written to this file
 }
 
@@ -955,7 +963,7 @@ const bufferSize = 256 * 1024
 
 // createFiles creates all the log files for severity from sev down to infoLog.
 // l.mu is held.
-func (l *LoggingT) createFiles(sev severity) error {
+func (l *LoggingT) createFiles(sev Severity) error {
 	now := time.Now()
 	// Files are created in decreasing severity order, so as soon as we find one
 	// has already been created, we can stop.
@@ -1021,7 +1029,7 @@ func CopyStandardLogTo(name string) {
 
 // logBridge provides the Write method that enables CopyStandardLogTo to connect
 // Go's standard logs to the logs provided by this package.
-type logBridge severity
+type logBridge Severity
 
 // Write parses the standard logging line and passes its components to the
 // logger for severity(lb).
@@ -1045,7 +1053,7 @@ func (lb logBridge) Write(b []byte) (n int, err error) {
 	}
 	// printWithFileLine with alsoToStderr=true, so standard log messages
 	// always appear on standard error.
-	logging.printWithFileLine(severity(lb), file, line, true, text)
+	logging.printWithFileLine(Severity(lb), file, line, true, text)
 	return len(b), nil
 }
 
