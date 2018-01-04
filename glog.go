@@ -413,7 +413,11 @@ type flushSyncWriter interface {
 // 	logging.Init()
 // }
 
-// var initOnce sync.Once
+func init() {
+	// Default stderrThreshold is ERROR.
+	logging.stderrThreshold = errorLog
+	logging.setVState(0, nil, false)
+}
 
 // Logger return internal logging
 func Logger() *LoggingT {
@@ -484,18 +488,37 @@ func (l *LoggingT) HeaderFormat(f HeaderFormatFunc) *LoggingT {
 	return l
 }
 
-// Init mark configration done
+// StdHeader set the header format as same as LstdFlags in Package `log`
+func (l *LoggingT) StdHeader() *LoggingT {
+	l.headerFormatHit = "2009/01/23 15:23:23 file:line: message"
+	l.headerFormater = func(buf *bytes.Buffer, _ Severity, ts time.Time, _ int, file string, line int) {
+		fmt.Fprintf(buf, "%s %s:%d: ", ts.Format("2006/01/02 15:04:05"), file, line)
+	}
+
+	return l
+}
+
+// HeaderFormatHit set header format hitting , e.g. [IWEF]mmdd hh:mm:ss.uuuuuu threadid file:line] msg
+func (l *LoggingT) HeaderFormatHit(hit string) *LoggingT {
+	l.headerFormatHit = hit
+	return l
+}
+
+// FlushInterval set logger flush interval
+func (l *LoggingT) FlushInterval(interval time.Duration) *LoggingT {
+	flushInterval = interval
+	return l
+}
+
+// EnableFileHeader enable the desc header in log file
+func (l *LoggingT) EnableFileHeader(enable bool) *LoggingT {
+	logFileheader = enable
+	return l
+}
+
+// Init mark configuration done
 func (l *LoggingT) Init() {
-
-	// initOnce.Do(func() {
-
-	// Default stderrThreshold is ERROR.
-	l.stderrThreshold = errorLog
-	l.setVState(0, nil, false)
 	go l.flushDaemon()
-
-	// })
-
 }
 
 // Flush flushes all pending log I/O.
@@ -924,6 +947,8 @@ func (sb *syncBuffer) Write(p []byte) (n int, err error) {
 	return
 }
 
+var logFileheader = false
+
 // rotateFile closes the syncBuffer's file and starts a new one.
 func (sb *syncBuffer) rotateFile(now time.Time) error {
 	if sb.file != nil {
@@ -939,20 +964,25 @@ func (sb *syncBuffer) rotateFile(now time.Time) error {
 
 	sb.Writer = bufio.NewWriterSize(sb.file, bufferSize)
 
-	// Write header.
-	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "Log file created at: %s\n", now.Format("2006/01/02 15:04:05"))
-	fmt.Fprintf(&buf, "Running on machine: %s\n", host)
-	fmt.Fprintf(&buf, "Binary: Built with %s %s for %s/%s\n", runtime.Compiler, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	if logFileheader {
+		// Write header.
+		var buf bytes.Buffer
+		fmt.Fprintf(&buf, "Log file created at: %s\n", now.Format("2006/01/02 15:04:05"))
+		fmt.Fprintf(&buf, "Running on machine: %s\n", host)
+		fmt.Fprintf(&buf, "Binary: Built with %s %s for %s/%s\n", runtime.Compiler, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 
-	if logging.headerFormater != nil {
-		fmt.Fprintf(&buf, "Log line format: %s\n", logging.headerFormatHit)
-	} else {
-		fmt.Fprintf(&buf, "Log line format: [IWEF]mmdd hh:mm:ss.uuuuuu threadid file:line] msg\n")
+		if logging.headerFormater != nil {
+			if logging.headerFormatHit != "" {
+				fmt.Fprintf(&buf, "Log line format: %s\n", logging.headerFormatHit)
+			}
+		} else {
+			fmt.Fprintf(&buf, "Log line format: [IWEF]mmdd hh:mm:ss.uuuuuu threadid file:line] msg\n")
+		}
+
+		n, err := sb.file.Write(buf.Bytes())
+		sb.nbytes += uint64(n)
+		return err
 	}
-
-	n, err := sb.file.Write(buf.Bytes())
-	sb.nbytes += uint64(n)
 	return err
 }
 
@@ -980,7 +1010,9 @@ func (l *LoggingT) createFiles(sev Severity) error {
 	return nil
 }
 
-const flushInterval = 30 * time.Second
+const defaultFlushInterval = 30 * time.Second
+
+var flushInterval = defaultFlushInterval
 
 // flushDaemon periodically flushes the log file buffers.
 func (l *LoggingT) flushDaemon() {

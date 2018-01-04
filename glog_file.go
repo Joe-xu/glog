@@ -42,7 +42,12 @@ var logDir string
 
 func createLogDirs() {
 	if logDir != "" {
-		logDirs = append(logDirs, logDir)
+		err := os.MkdirAll(filepath.Clean(logDir), os.ModePerm|os.ModeDir)
+		if err != nil {
+			logging.exit(err)
+		} else {
+			logDirs = append(logDirs, logDir)
+		}
 	}
 	logDirs = append(logDirs, os.TempDir())
 }
@@ -119,6 +124,7 @@ func create(tag string, t time.Time) (f *os.File, filename string, err error) {
 			return f, fname, nil
 		}
 		lastErr = err
+		return nil, "", fmt.Errorf("log: cannot create log: %v", lastErr)
 	}
 	return nil, "", fmt.Errorf("log: cannot create log: %v", lastErr)
 }
