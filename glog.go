@@ -74,7 +74,6 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	stdLog "log"
@@ -88,21 +87,29 @@ import (
 	"time"
 )
 
-// severity identifies the sort of log: info, warning etc. It also implements
-// the flag.Value interface. The -stderrthreshold flag is of type severity and
+// Severity identifies the sort of log: info, warning etc. It also implements
+// the flag.Value interface. The -stderrthreshold flag is of type Severity and
 // should be modified only through the flag.Value interface. The values match
 // the corresponding constants in C++.
-type severity int32 // sync/atomic int32
+type Severity int32 // sync/atomic int32
 
 // These constants identify the log levels in order of increasing severity.
 // A message written to a high-severity log file is also written to each
 // lower-severity log file.
 const (
-	infoLog severity = iota
+	infoLog Severity = iota
 	warningLog
 	errorLog
 	fatalLog
 	numSeverity = 4
+)
+
+// These constants identify the log levels in order of increasing severity.
+const (
+	InfoLog  = infoLog
+	WarnLog  = warningLog
+	ErrorLog = errorLog
+	FatalLog = fatalLog
 )
 
 const severityChar = "IWEF"
@@ -115,28 +122,28 @@ var severityName = []string{
 }
 
 // get returns the value of the severity.
-func (s *severity) get() severity {
-	return severity(atomic.LoadInt32((*int32)(s)))
+func (s *Severity) get() Severity {
+	return Severity(atomic.LoadInt32((*int32)(s)))
 }
 
 // set sets the value of the severity.
-func (s *severity) set(val severity) {
+func (s *Severity) set(val Severity) {
 	atomic.StoreInt32((*int32)(s), int32(val))
 }
 
 // String is part of the flag.Value interface.
-func (s *severity) String() string {
+func (s *Severity) String() string {
 	return strconv.FormatInt(int64(*s), 10)
 }
 
 // Get is part of the flag.Value interface.
-func (s *severity) Get() interface{} {
+func (s *Severity) Get() interface{} {
 	return *s
 }
 
 // Set is part of the flag.Value interface.
-func (s *severity) Set(value string) error {
-	var threshold severity
+func (s *Severity) Set(value string) error {
+	var threshold Severity
 	// Is it a known name?
 	if v, ok := severityByName(value); ok {
 		threshold = v
@@ -145,17 +152,17 @@ func (s *severity) Set(value string) error {
 		if err != nil {
 			return err
 		}
-		threshold = severity(v)
+		threshold = Severity(v)
 	}
 	logging.stderrThreshold.set(threshold)
 	return nil
 }
 
-func severityByName(s string) (severity, bool) {
+func severityByName(s string) (Severity, bool) {
 	s = strings.ToUpper(s)
 	for i, name := range severityName {
 		if name == s {
-			return severity(i), true
+			return Severity(i), true
 		}
 	}
 	return 0, false
@@ -214,8 +221,8 @@ func (l *Level) set(val Level) {
 }
 
 // String is part of the flag.Value interface.
-func (l *Level) String() string {
-	return strconv.FormatInt(int64(*l), 10)
+func (l Level) String() string {
+	return strconv.FormatInt(int64(l), 10)
 }
 
 // Get is part of the flag.Value interface.
@@ -395,19 +402,100 @@ type flushSyncWriter interface {
 	io.Writer
 }
 
-func init() {
-	flag.BoolVar(&logging.toStderr, "logtostderr", false, "log to standard error instead of files")
-	flag.BoolVar(&logging.alsoToStderr, "alsologtostderr", false, "log to standard error as well as files")
-	flag.Var(&logging.verbosity, "v", "log level for V logs")
-	flag.Var(&logging.stderrThreshold, "stderrthreshold", "logs at or above this threshold go to stderr")
-	flag.Var(&logging.vmodule, "vmodule", "comma-separated list of pattern=N settings for file-filtered logging")
-	flag.Var(&logging.traceLocation, "log_backtrace_at", "when logging hits line file:N, emit a stack trace")
+// func init() {
+// 	flag.BoolVar(&logging.toStderr, "logtostderr", false, "log to standard error instead of files")
+// 	flag.BoolVar(&logging.alsoToStderr, "alsologtostderr", false, "log to standard error as well as files")
+// 	flag.Var(&logging.verbosity, "v", "log level for V logs")
+// 	flag.Var(&logging.stderrThreshold, "stderrthreshold", "logs at or above this threshold go to stderr")
+// 	flag.Var(&logging.vmodule, "vmodule", "comma-separated list of pattern=N settings for file-filtered logging")
+// 	flag.Var(&logging.traceLocation, "log_backtrace_at", "when logging hits line file:N, emit a stack trace")
+
+// 	logging.Init()
+// }
+
+// var initOnce sync.Once
+
+// Logger return internal logging
+func Logger() *LoggingT {
+	// if flag.Parsed() { // configured in command-line way
+	// 	// logging.Init()
+	// 	return nil
+	// }
+	return &logging
+}
+
+// ToStderr set logging log to stderr
+func (l *LoggingT) ToStderr(enable bool) *LoggingT {
+	l.toStderr = enable
+	return l
+}
+
+// AlsoToStderr set logging log to stderr in addtional
+func (l *LoggingT) AlsoToStderr(enable bool) *LoggingT {
+	l.alsoToStderr = enable
+	return l
+}
+
+// Verbo set the logging verbosity
+func (l *LoggingT) Verbo(value string) *LoggingT {
+	err := l.verbosity.Set(value)
+	if err != nil {
+		l.exit(err)
+	}
+	return l
+}
+
+// StderrThreshold set the logging stderrThreshold
+func (l *LoggingT) StderrThreshold(value string) *LoggingT {
+	err := l.stderrThreshold.Set(value)
+	if err != nil {
+		l.exit(err)
+	}
+	return l
+}
+
+// Vmodule set the logging vmodule
+func (l *LoggingT) Vmodule(value string) *LoggingT {
+	err := l.vmodule.Set(value)
+	if err != nil {
+		l.exit(err)
+	}
+	return l
+}
+
+// TraceLocation set the logging traceLocation
+func (l *LoggingT) TraceLocation(value string) *LoggingT {
+	err := l.traceLocation.Set(value)
+	if err != nil {
+		l.exit(err)
+	}
+	return l
+}
+
+// LogDir set the logging output dir
+func (l *LoggingT) LogDir(value string) *LoggingT {
+	logDir = value
+	return l
+}
+
+// HeaderFormat set the logging header format callback
+func (l *LoggingT) HeaderFormat(f HeaderFormatFunc) *LoggingT {
+	l.headerFormater = f
+	return l
+}
+
+// Init mark configration done
+func (l *LoggingT) Init() {
+
+	// initOnce.Do(func() {
 
 	// Default stderrThreshold is ERROR.
-	logging.stderrThreshold = errorLog
+	l.stderrThreshold = errorLog
+	l.setVState(0, nil, false)
+	go l.flushDaemon()
 
-	logging.setVState(0, nil, false)
-	go logging.flushDaemon()
+	// })
+
 }
 
 // Flush flushes all pending log I/O.
@@ -415,8 +503,8 @@ func Flush() {
 	logging.lockAndFlushAll()
 }
 
-// loggingT collects all the global state of the logging setup.
-type loggingT struct {
+// LoggingT collects all the global state of the logging setup.
+type LoggingT struct {
 	// Boolean flags. Not handled atomically because the flag.Value interface
 	// does not let us avoid the =true, and that shorthand is necessary for
 	// compatibility. TODO: does this matter enough to fix? Seems unlikely.
@@ -424,7 +512,7 @@ type loggingT struct {
 	alsoToStderr bool // The -alsologtostderr flag.
 
 	// Level flag. Handled atomically.
-	stderrThreshold severity // The -stderrthreshold flag.
+	stderrThreshold Severity // The -stderrthreshold flag.
 
 	// freeList is a list of byte buffers, maintained under freeListMu.
 	freeList *buffer
@@ -453,6 +541,11 @@ type loggingT struct {
 	// safely using atomic.LoadInt32.
 	vmodule   moduleSpec // The state of the -vmodule flag.
 	verbosity Level      // V logging level, the value of the -v flag/
+
+	// to format the custom header
+	headerFormater HeaderFormatFunc
+	// custom header format hit
+	headerFormatHit string
 }
 
 // buffer holds a byte Buffer for reuse. The zero value is ready for use.
@@ -462,11 +555,11 @@ type buffer struct {
 	next *buffer
 }
 
-var logging loggingT
+var logging LoggingT
 
 // setVState sets a consistent state for V logging.
 // l.mu is held.
-func (l *loggingT) setVState(verbosity Level, filter []modulePat, setFilter bool) {
+func (l *LoggingT) setVState(verbosity Level, filter []modulePat, setFilter bool) {
 	// Turn verbosity off so V will not fire while we are in transition.
 	logging.verbosity.set(0)
 	// Ditto for filter length.
@@ -485,7 +578,7 @@ func (l *loggingT) setVState(verbosity Level, filter []modulePat, setFilter bool
 }
 
 // getBuffer returns a new, ready-to-use buffer.
-func (l *loggingT) getBuffer() *buffer {
+func (l *LoggingT) getBuffer() *buffer {
 	l.freeListMu.Lock()
 	b := l.freeList
 	if b != nil {
@@ -502,7 +595,7 @@ func (l *loggingT) getBuffer() *buffer {
 }
 
 // putBuffer returns a buffer to the free list.
-func (l *loggingT) putBuffer(b *buffer) {
+func (l *LoggingT) putBuffer(b *buffer) {
 	if b.Len() >= 256 {
 		// Let big buffers die a natural death.
 		return
@@ -532,7 +625,7 @@ where the fields are defined as follows:
 	line             The line number
 	msg              The user-supplied message
 */
-func (l *loggingT) header(s severity, depth int) (*buffer, string, int) {
+func (l *LoggingT) header(s Severity, depth int) (*buffer, string, int) {
 	_, file, line, ok := runtime.Caller(3 + depth)
 	if !ok {
 		file = "???"
@@ -546,8 +639,11 @@ func (l *loggingT) header(s severity, depth int) (*buffer, string, int) {
 	return l.formatHeader(s, file, line), file, line
 }
 
+// HeaderFormatFunc define the callback to made up custom header
+type HeaderFormatFunc func(buf *bytes.Buffer, l Severity, ts time.Time, pid int, file string, line int)
+
 // formatHeader formats a log header using the provided file name and line number.
-func (l *loggingT) formatHeader(s severity, file string, line int) *buffer {
+func (l *LoggingT) formatHeader(s Severity, file string, line int) *buffer {
 	now := timeNow()
 	if line < 0 {
 		line = 0 // not a real line number, but acceptable to someDigits
@@ -556,6 +652,12 @@ func (l *loggingT) formatHeader(s severity, file string, line int) *buffer {
 		s = infoLog // for safety.
 	}
 	buf := l.getBuffer()
+
+	// use custom header
+	if l.headerFormater != nil {
+		l.headerFormater(&buf.Buffer, s, now, pid, file, line)
+		return buf
+	}
 
 	// Avoid Fprintf, for speed. The format is so simple that we can do it quickly by hand.
 	// It's worth about 3X. Fprintf is hard.
@@ -627,17 +729,17 @@ func (buf *buffer) someDigits(i, d int) int {
 	return copy(buf.tmp[i:], buf.tmp[j:])
 }
 
-func (l *loggingT) println(s severity, args ...interface{}) {
+func (l *LoggingT) println(s Severity, args ...interface{}) {
 	buf, file, line := l.header(s, 0)
 	fmt.Fprintln(buf, args...)
 	l.output(s, buf, file, line, false)
 }
 
-func (l *loggingT) print(s severity, args ...interface{}) {
+func (l *LoggingT) print(s Severity, args ...interface{}) {
 	l.printDepth(s, 1, args...)
 }
 
-func (l *loggingT) printDepth(s severity, depth int, args ...interface{}) {
+func (l *LoggingT) printDepth(s Severity, depth int, args ...interface{}) {
 	buf, file, line := l.header(s, depth)
 	fmt.Fprint(buf, args...)
 	if buf.Bytes()[buf.Len()-1] != '\n' {
@@ -646,7 +748,7 @@ func (l *loggingT) printDepth(s severity, depth int, args ...interface{}) {
 	l.output(s, buf, file, line, false)
 }
 
-func (l *loggingT) printf(s severity, format string, args ...interface{}) {
+func (l *LoggingT) printf(s Severity, format string, args ...interface{}) {
 	buf, file, line := l.header(s, 0)
 	fmt.Fprintf(buf, format, args...)
 	if buf.Bytes()[buf.Len()-1] != '\n' {
@@ -658,7 +760,7 @@ func (l *loggingT) printf(s severity, format string, args ...interface{}) {
 // printWithFileLine behaves like print but uses the provided file and line number.  If
 // alsoLogToStderr is true, the log message always appears on standard error; it
 // will also appear in the log file unless --logtostderr is set.
-func (l *loggingT) printWithFileLine(s severity, file string, line int, alsoToStderr bool, args ...interface{}) {
+func (l *LoggingT) printWithFileLine(s Severity, file string, line int, alsoToStderr bool, args ...interface{}) {
 	buf := l.formatHeader(s, file, line)
 	fmt.Fprint(buf, args...)
 	if buf.Bytes()[buf.Len()-1] != '\n' {
@@ -668,7 +770,7 @@ func (l *loggingT) printWithFileLine(s severity, file string, line int, alsoToSt
 }
 
 // output writes the data to the log files and releases the buffer.
-func (l *loggingT) output(s severity, buf *buffer, file string, line int, alsoToStderr bool) {
+func (l *LoggingT) output(s Severity, buf *buffer, file string, line int, alsoToStderr bool) {
 	l.mu.Lock()
 	if l.traceLocation.isSet() {
 		if l.traceLocation.match(file, line) {
@@ -676,10 +778,7 @@ func (l *loggingT) output(s severity, buf *buffer, file string, line int, alsoTo
 		}
 	}
 	data := buf.Bytes()
-	if !flag.Parsed() {
-		os.Stderr.Write([]byte("ERROR: logging before flag.Parse: "))
-		os.Stderr.Write(data)
-	} else if l.toStderr {
+	if l.toStderr {
 		os.Stderr.Write(data)
 	} else {
 		if alsoToStderr || l.alsoToStderr || s >= l.stderrThreshold.get() {
@@ -784,7 +883,7 @@ var logExitFunc func(error)
 // exit is called if there is trouble creating or writing log files.
 // It flushes the logs and exits the program; there's no point in hanging around.
 // l.mu is held.
-func (l *loggingT) exit(err error) {
+func (l *LoggingT) exit(err error) {
 	fmt.Fprintf(os.Stderr, "log: exiting because of error: %s\n", err)
 	// If logExitFunc is set, we do that instead of exiting.
 	if logExitFunc != nil {
@@ -800,10 +899,10 @@ func (l *loggingT) exit(err error) {
 // file rotation. There are conflicting methods, so the file cannot be embedded.
 // l.mu is held for all its methods.
 type syncBuffer struct {
-	logger *loggingT
+	logger *LoggingT
 	*bufio.Writer
 	file   *os.File
-	sev    severity
+	sev    Severity
 	nbytes uint64 // The number of bytes written to this file
 }
 
@@ -845,7 +944,13 @@ func (sb *syncBuffer) rotateFile(now time.Time) error {
 	fmt.Fprintf(&buf, "Log file created at: %s\n", now.Format("2006/01/02 15:04:05"))
 	fmt.Fprintf(&buf, "Running on machine: %s\n", host)
 	fmt.Fprintf(&buf, "Binary: Built with %s %s for %s/%s\n", runtime.Compiler, runtime.Version(), runtime.GOOS, runtime.GOARCH)
-	fmt.Fprintf(&buf, "Log line format: [IWEF]mmdd hh:mm:ss.uuuuuu threadid file:line] msg\n")
+
+	if logging.headerFormater != nil {
+		fmt.Fprintf(&buf, "Log line format: %s\n", logging.headerFormatHit)
+	} else {
+		fmt.Fprintf(&buf, "Log line format: [IWEF]mmdd hh:mm:ss.uuuuuu threadid file:line] msg\n")
+	}
+
 	n, err := sb.file.Write(buf.Bytes())
 	sb.nbytes += uint64(n)
 	return err
@@ -858,7 +963,7 @@ const bufferSize = 256 * 1024
 
 // createFiles creates all the log files for severity from sev down to infoLog.
 // l.mu is held.
-func (l *loggingT) createFiles(sev severity) error {
+func (l *LoggingT) createFiles(sev Severity) error {
 	now := time.Now()
 	// Files are created in decreasing severity order, so as soon as we find one
 	// has already been created, we can stop.
@@ -878,14 +983,14 @@ func (l *loggingT) createFiles(sev severity) error {
 const flushInterval = 30 * time.Second
 
 // flushDaemon periodically flushes the log file buffers.
-func (l *loggingT) flushDaemon() {
+func (l *LoggingT) flushDaemon() {
 	for _ = range time.NewTicker(flushInterval).C {
 		l.lockAndFlushAll()
 	}
 }
 
 // lockAndFlushAll is like flushAll but locks l.mu first.
-func (l *loggingT) lockAndFlushAll() {
+func (l *LoggingT) lockAndFlushAll() {
 	l.mu.Lock()
 	l.flushAll()
 	l.mu.Unlock()
@@ -893,7 +998,7 @@ func (l *loggingT) lockAndFlushAll() {
 
 // flushAll flushes all the logs and attempts to "sync" their data to disk.
 // l.mu is held.
-func (l *loggingT) flushAll() {
+func (l *LoggingT) flushAll() {
 	// Flush from fatal down, in case there's trouble flushing.
 	for s := fatalLog; s >= infoLog; s-- {
 		file := l.file[s]
@@ -924,7 +1029,7 @@ func CopyStandardLogTo(name string) {
 
 // logBridge provides the Write method that enables CopyStandardLogTo to connect
 // Go's standard logs to the logs provided by this package.
-type logBridge severity
+type logBridge Severity
 
 // Write parses the standard logging line and passes its components to the
 // logger for severity(lb).
@@ -948,7 +1053,7 @@ func (lb logBridge) Write(b []byte) (n int, err error) {
 	}
 	// printWithFileLine with alsoToStderr=true, so standard log messages
 	// always appear on standard error.
-	logging.printWithFileLine(severity(lb), file, line, true, text)
+	logging.printWithFileLine(Severity(lb), file, line, true, text)
 	return len(b), nil
 }
 
@@ -958,7 +1063,7 @@ func (lb logBridge) Write(b []byte) (n int, err error) {
 // of its .go suffix, and uses filepath.Match, which is a little more
 // general than the *? matching used in C++.
 // l.mu is held.
-func (l *loggingT) setV(pc uintptr) Level {
+func (l *LoggingT) setV(pc uintptr) Level {
 	fn := runtime.FuncForPC(pc)
 	file, _ := fn.FileLine(pc)
 	// The file is something like /a/b/c/d.go. We want just the d.
